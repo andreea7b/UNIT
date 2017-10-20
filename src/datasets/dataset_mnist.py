@@ -12,6 +12,8 @@ import numpy as np
 import torch.utils.data as data
 import torch
 import urllib
+from scipy import ndimage
+from PIL import Image
 
 class dataset_mnist32x32_train(data.Dataset):
   def __init__(self, specs):
@@ -19,6 +21,8 @@ class dataset_mnist32x32_train(data.Dataset):
     self.filename = 'mnist32x32.pkl.gz'
     self.root = specs['root']
     self.use_inversion = specs['use_inversion']
+    self.rotations = specs['rotations']
+    self.samples_fraction = specs['samples_fraction']
     full_filepath = os.path.join(self.root, self.filename)
     self._download(full_filepath, self.url)
     data_set = self._load_samples(full_filepath)
@@ -39,15 +43,24 @@ class dataset_mnist32x32_train(data.Dataset):
     f = gzip.open(full_filepath, 'rb')
     train_set, valid_set, test_set = cPickle.load(f)
     f.close()
+    #import pdb; pdb.set_trace()
     images = np.concatenate((train_set[0], valid_set[0]), axis=0)
     labels = np.concatenate((train_set[1], valid_set[1]), axis=0)
     images = images.reshape((images.shape[0], 1, 32, 32))
-    # images = np.concatenate((images, images, images), axis=1)
+    if self.samples_fraction == 'bottom_half':
+        images = images[0:int(images.shape[0]/2)]
+    elif self.samples_fraction == 'top_half':
+        images = images[int(images.shape[0]/2):]
     if self.use_inversion == 1:
       images = np.concatenate((images, 1 - images), axis=0)
       labels = np.concatenate((labels, labels), axis=0)   
     images = (images - 0.5) * 2
-    return np.float32(images), labels
+    rotated_images = []
+    rotated_labels = []
+    for degrees in self.rotations:
+      rotated_images.extend(self.rotate(images, degrees))
+      rotated_labels.extend(labels)
+    return np.float32(rotated_images), rotated_labels
 
   def _download(self, filename, url):
     dirname = os.path.dirname(filename)
@@ -81,12 +94,23 @@ class dataset_mnist32x32_train(data.Dataset):
                     [_resize(test_set[0]), test_set[1]]),
                    handle)
 
+  def rotate(self, images, degrees):
+    rotated_images = []
+    for image in images:
+      img = Image.fromarray(image[0], mode='L')
+      img = img.rotate(degrees)
+      img = np.array(img)
+      rotated_images.append(img[np.newaxis, :])
+      #rotated_images.append(ndimage.rotate(image, degrees, axes=(-2,-1)))
+    return rotated_images
+
 class dataset_mnist32x32_test(dataset_mnist32x32_train):
   def __init__(self, specs):
     self.url = 'http://deeplearning.net/data/mnist/mnist.pkl.gz'
     self.filename = 'mnist32x32.pkl.gz'
     self.root = specs['root']
     self.use_inversion = specs['use_inversion']
+    self.rotations = specs['rotations']
     full_filepath = os.path.join(self.root, self.filename)
     self._download(full_filepath, self.url)
     data_set = self._load_samples(full_filepath)
@@ -101,4 +125,10 @@ class dataset_mnist32x32_test(dataset_mnist32x32_train):
     images = test_set[0]
     labels = test_set[1]
     images = (images - 0.5) * 2
-    return np.float32(images), labels
+    rotated_images = []
+    rotated_labels = []
+    for degrees in self.rotations:
+      rotated_images.extend(self.rotate(images, degrees))
+      rotated_labels.extend(labels)
+    return np.float32(rotated_images), rotated_labels
+
